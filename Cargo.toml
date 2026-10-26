@@ -1,0 +1,13 @@
+[package]
+name = "openwave"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = "0.37"
+rfd = "0.17"
+vlc-rs = "0.3"
+anyhow = "1.0"
+resvg = "0.45"
+usvg = "0.45"
+tiny-skia = "0.11"
