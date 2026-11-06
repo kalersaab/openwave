@@ -16,6 +16,7 @@ pub struct App {
     pub(crate) player: Player,
     pub(crate) error_handler: ErrorHandler,
     pub(crate) ui: UiState,
+    pub(crate) video_texture: Option<egui::TextureHandle>,
 }
 
 impl App {
@@ -24,6 +25,7 @@ impl App {
             player: Player::new(),
             error_handler: ErrorHandler::new(),
             ui: UiState::default(),
+            video_texture: None,
         }
     }
 
@@ -85,6 +87,7 @@ impl App {
         let Some(path) = self.ui.select_index(index) else {
             return;
         };
+        self.video_texture = None;
 
         match self.player.open(&path) {
             Ok(format) => {
@@ -94,6 +97,9 @@ impl App {
                 }
                 self.ui.last_error = None;
                 self.ui.playback.position = Duration::ZERO;
+                self.ui.playback.duration =
+                    Duration::from_millis(self.player.duration().max(0) as u64);
+                self.apply_audio_settings();
             }
             Err(error) => {
                 self.ui.playback.playing = false;
@@ -141,21 +147,40 @@ impl App {
         self.ui.playback.seek_relative(seconds);
     }
 
+    pub fn set_volume(&mut self, volume: f32) {
+        self.ui.playback.set_volume(volume);
+        self.apply_audio_settings();
+    }
+
     pub fn change_volume(&mut self, delta: f32) {
         self.ui.playback.change_volume(delta);
-        // Convert from 0-200% to VLC's 0-100
-        let vlc_volume = (self.ui.playback.volume as f32 / 2.0) as i32;
-        self.player.set_volume(vlc_volume);
+        self.apply_audio_settings();
     }
 
     pub fn toggle_mute(&mut self) {
         self.ui.playback.toggle_mute();
-        self.player.set_mute(self.ui.playback.muted);
+        self.apply_audio_settings();
     }
 
     pub fn set_speed(&mut self, speed: f32) {
         self.ui.playback.speed = speed.clamp(0.25, 4.0);
-        self.player.set_rate(speed);
+        self.apply_audio_settings();
+    }
+
+    fn apply_audio_settings(&mut self) -> bool {
+        match self.player.set_audio_settings(
+            self.ui.playback.engine_volume(),
+            self.ui.playback.muted,
+            self.ui.playback.speed,
+        ) {
+            Ok(()) => true,
+            Err(error) => {
+                self.ui.last_error = Some(error.to_string());
+                self.ui.status = error.to_string();
+                self.error_handler.report(&error);
+                false
+            }
+        }
     }
 
     pub fn next_track(&mut self) {
@@ -206,8 +231,19 @@ impl App {
 
     fn start_playback(&mut self) {
         if self.ui.has_media() {
+            if !self.apply_audio_settings() {
+                return;
+            }
+
+            if let Err(error) = self.player.play() {
+                self.ui.playback.playing = false;
+                self.ui.last_error = Some(error.to_string());
+                self.ui.status = error.to_string();
+                self.error_handler.report(&error);
+                return;
+            }
+
             self.ui.playback.playing = true;
-            self.player.play();
             self.ui.status = self
                 .ui
                 .current_entry()
@@ -234,7 +270,76 @@ impl Default for App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if let Some(error) = self.player.take_missing_codec_error() {
+            self.ui.playback.playing = false;
+            self.ui.last_error = Some(error.to_string());
+            self.ui.status = "Video playback failed because a codec is unavailable".to_string();
+            self.error_handler.report(&error);
+        }
+        self.update_video_texture(ui.ctx());
+        self.update_playback_timer();
+        if self.ui.playback.playing {
+            if let Err(error) = self.player.sync_audio_settings() {
+                self.ui.last_error = Some(error.to_string());
+                self.ui.status = error.to_string();
+                self.error_handler.report(&error);
+            }
+            ui.ctx().request_repaint_after(Duration::from_millis(16));
+        }
         window::show(self, ui, frame);
+    }
+}
+
+impl App {
+    fn update_playback_timer(&mut self) {
+        if !self.ui.has_media() {
+            return;
+        }
+
+        let duration_ms = self.player.duration();
+        if duration_ms > 0 {
+            self.ui.playback.duration = Duration::from_millis(duration_ms as u64);
+        }
+
+        let position_ms = self.player.position();
+        if position_ms >= 0 {
+            self.ui.playback.position = Duration::from_millis(position_ms as u64);
+        }
+    }
+
+    fn update_video_texture(&mut self, ctx: &egui::Context) {
+        if !self.ui.current_format().is_some_and(MediaFormat::is_video) {
+            self.video_texture = None;
+            return;
+        }
+
+        let Some(frame) = self.player.take_decoded_frame() else {
+            return;
+        };
+
+        let width = frame.width as usize;
+        let height = frame.height as usize;
+
+        let mut rgba = Vec::with_capacity(width * height * 4);
+        let row_bytes = frame.pitch as usize;
+        if row_bytes < width * 3 || frame.pixels.len() < row_bytes.saturating_mul(height) {
+            return;
+        }
+        for row in frame.pixels.chunks_exact(row_bytes).take(height) {
+            for pixel in row.chunks_exact(3).take(width) {
+                rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+            }
+        }
+
+        let image = egui::ColorImage::from_rgba_unmultiplied([width, height], &rgba);
+        if let Some(texture) = &mut self.video_texture
+            && texture.size() == [width, height]
+        {
+            texture.set(image, egui::TextureOptions::LINEAR);
+        } else {
+            self.video_texture =
+                Some(ctx.load_texture("video_frame", image, egui::TextureOptions::LINEAR));
+        }
     }
 }
 

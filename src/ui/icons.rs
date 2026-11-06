@@ -26,7 +26,12 @@ impl IconManager {
     }
 
     /// Load an SVG icon from the assets directory
-    pub fn load_svg(&mut self, name: &str, svg_data: &str, size: u32) -> Result<Arc<ColorImage>, String> {
+    pub fn load_svg(
+        &mut self,
+        name: &str,
+        svg_data: &str,
+        size: u32,
+    ) -> Result<Arc<ColorImage>, String> {
         if let Some(cached) = self.icons.get(name) {
             return Ok(Arc::clone(cached));
         }
@@ -35,20 +40,19 @@ impl IconManager {
         let tree = usvg::Tree::from_str(svg_data, &opt)
             .map_err(|e| format!("Failed to parse SVG: {}", e))?;
 
-        let mut pixmap = tiny_skia::Pixmap::new(size, size)
-            .ok_or("Failed to create pixmap")?;
+        let mut pixmap = tiny_skia::Pixmap::new(size, size).ok_or("Failed to create pixmap")?;
 
         let transform = tiny_skia::Transform::from_scale(
             size as f32 / tree.size().width(),
             size as f32 / tree.size().height(),
         );
-        
+
         resvg::render(&tree, transform, &mut pixmap.as_mut());
 
         // Convert RGBA to ColorImage
         let pixels = pixmap.data();
         let mut rgba_pixels = Vec::with_capacity((size * size * 4) as usize);
-        
+
         for chunk in pixels.chunks(4) {
             rgba_pixels.push(chunk[0]); // R
             rgba_pixels.push(chunk[1]); // G
@@ -56,10 +60,8 @@ impl IconManager {
             rgba_pixels.push(chunk[3]); // A
         }
 
-        let color_image = ColorImage::from_rgba_unmultiplied(
-            [size as usize, size as usize],
-            &rgba_pixels,
-        );
+        let color_image =
+            ColorImage::from_rgba_unmultiplied([size as usize, size as usize], &rgba_pixels);
 
         let arc_image = Arc::new(color_image);
         self.icons.insert(name.to_string(), Arc::clone(&arc_image));
@@ -67,17 +69,19 @@ impl IconManager {
     }
 
     /// Get or create a texture for an icon
-    pub fn get_texture(&mut self, ctx: &egui::Context, name: &str, svg_data: &str, size: u32) -> Result<TextureHandle, String> {
+    pub fn get_texture(
+        &mut self,
+        ctx: &egui::Context,
+        name: &str,
+        svg_data: &str,
+        size: u32,
+    ) -> Result<TextureHandle, String> {
         if let Some(texture) = self.textures.get(name) {
             return Ok(texture.clone());
         }
 
         let color_image = self.load_svg(name, svg_data, size)?;
-        let texture = ctx.load_texture(
-            name,
-            (*color_image).clone(),
-            TextureOptions::LINEAR,
-        );
+        let texture = ctx.load_texture(name, (*color_image).clone(), TextureOptions::LINEAR);
 
         self.textures.insert(name.to_string(), texture.clone());
         Ok(texture)
