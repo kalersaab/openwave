@@ -203,12 +203,15 @@ fn show_transport(app: &mut App, ui: &mut egui::Ui) {
         app.seek_to(seconds);
     }
 
-    if let Some(action) = controls::show(ui, &mut app.ui) {
+    for action in controls::show(ui, &mut app.ui) {
         match action {
             TransportAction::PlayPause => app.toggle_play_pause(),
             TransportAction::Stop => app.stop(),
             TransportAction::Previous => app.previous_track(),
             TransportAction::Next => app.next_track(),
+            TransportAction::SetVolume(volume) => app.set_volume(volume),
+            TransportAction::ToggleMute => app.toggle_mute(),
+            TransportAction::SetSpeed(speed) => app.set_speed(speed),
         }
     }
 
@@ -283,6 +286,20 @@ fn paint_preview(ui: &mut egui::Ui, app: &App) {
     let visuals = ui.visuals();
 
     painter.rect_filled(rect, 10.0, visuals.extreme_bg_color);
+
+    if let Some(texture) = &app.video_texture {
+        let texture_size = texture.size_vec2();
+        let scale = (rect.width() / texture_size.x).min(rect.height() / texture_size.y);
+        let size = texture_size * scale;
+        let image_rect = egui::Rect::from_center_size(rect.center(), size);
+        painter.image(
+            texture.id(),
+            image_rect,
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+        return;
+    }
 
     let accent = visuals.selection.bg_fill;
     let text_color = visuals.strong_text_color();

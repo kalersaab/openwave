@@ -174,6 +174,11 @@ impl PlaybackState {
         if self.muted { 0.0 } else { self.volume }
     }
 
+    /// Player volume: 0-100 is normal range, values up to 200 amplify.
+    pub fn engine_volume(&self) -> i32 {
+        self.volume.round().clamp(MIN_VOLUME, MAX_VOLUME) as i32
+    }
+
     pub fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(MIN_VOLUME, MAX_VOLUME);
         if self.volume > 0.0 {
@@ -512,6 +517,18 @@ mod tests {
         assert_eq!(playback.volume, MAX_VOLUME);
         playback.set_volume(-10.0);
         assert_eq!(playback.volume, MIN_VOLUME);
+    }
+
+    #[test]
+    fn engine_volume_maps_ui_percent_to_player_range() {
+        let mut playback = PlaybackState::default();
+        playback.set_volume(100.0);
+        assert_eq!(playback.engine_volume(), 100);
+        playback.set_volume(200.0);
+        assert_eq!(playback.engine_volume(), 200);
+        playback.toggle_mute();
+        assert_eq!(playback.engine_volume(), 200);
+        assert_eq!(playback.effective_volume(), 0.0);
     }
 
     #[test]
